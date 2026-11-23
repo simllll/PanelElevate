@@ -92,7 +92,8 @@ class AlarmWatcher(private val context: Context, private val hass: HassClient, p
         }
     }
 
-    private fun requestKeepAwake() {
+    /** Asks the service to wake the display and restart its standby timer (also used for popups). */
+    fun requestKeepAwake() {
         try {
             context.sendBroadcast(Intent(AlarmContract.ACTION_KEEP_AWAKE).setPackage(context.packageName))
         } catch (e: Exception) {

@@ -20,7 +20,10 @@ import android.util.Log;
  *   by Android), and restore the original timeout as soon as ACTION_SCREEN_OFF arrives (or
  *   after {@link #RESTORE_DEADLINE_MS} at the latest). The original value is persisted first,
  *   so a crash in between cannot leave the panel with a 1 s timeout ({@link #recover()}).</li>
- *   <li>on: a short SCREEN_BRIGHT_WAKE_LOCK with ACQUIRE_CAUSES_WAKEUP | ON_AFTER_RELEASE.</li>
+ *   <li>on: a short SCREEN_BRIGHT_WAKE_LOCK with ACQUIRE_CAUSES_WAKEUP | ON_AFTER_RELEASE. If the
+ *   display is already on, the same lock without ACQUIRE_CAUSES_WAKEUP: its release counts as user
+ *   activity, which restarts Android's own screen-off timer and ends its dim phase (Android dims
+ *   the last seconds before that timeout, e.g. in the middle of a popup).</li>
  * </ul>
  *
  * While the screen is off a partial wake lock keeps the CPU running (MQTT, sensors, touch reader).
@@ -115,7 +118,12 @@ public class ScreenOffTimeoutStrategy implements ScreenPowerStrategy {
     public void screenOn() {
         restoreTimeout();
         if (cpuLock.isHeld()) cpuLock.release();
-        if (powerManager.isInteractive()) return;
+        if (powerManager.isInteractive()) {
+            // Already on: only poke user activity (restarts Android's timeout, ends its dim phase)
+            powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
+                    "shellyelevate:poke").acquire(WAKE_HOLD_MS);
+            return;
+        }
         Log.i(TAG, "Waking the screen");
         PowerManager.WakeLock wake = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK
                 | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "shellyelevate:wake");
