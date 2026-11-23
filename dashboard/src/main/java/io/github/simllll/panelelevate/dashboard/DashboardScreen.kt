@@ -43,6 +43,9 @@ import io.github.simllll.panelelevate.dashboard.theme.ProvideHaTheme
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 
+private const val POPUP_KEEP_AWAKE_MS = 5_000L
+private const val POPUP_KEEP_AWAKE_MAX_MS = 60_000L
+
 /** Root composable: current view, popup layer and the connection indicator. */
 @Composable
 fun DashboardScreen(runtime: DashboardRuntime) {
@@ -79,6 +82,19 @@ fun DashboardScreen(runtime: DashboardRuntime) {
             val lockConfig by runtime.guestLockConfig.collectAsState()
             GuestLockLayer(runtime.guestLock, lockConfig, runtime.cardContext)
             runtime.popups.Layer(runtime.cardContext)
+            // A newly opened popup (lock feedback, doorbell) keeps the display awake and bright for its
+            // first minute; long-lived reminder popups must not keep the panel lit for hours (the
+            // alarm keeps the display awake on its own, see AlarmWatcher)
+            val popupOpen = runtime.popups.isShowingPopup
+            val popupGeneration = runtime.popups.browserModPopupGeneration
+            LaunchedEffect(popupOpen, popupGeneration) {
+                if (!popupOpen) return@LaunchedEffect
+                val until = System.currentTimeMillis() + POPUP_KEEP_AWAKE_MAX_MS
+                while (System.currentTimeMillis() < until) {
+                    runtime.alarm.requestKeepAwake()
+                    delay(POPUP_KEEP_AWAKE_MS)
+                }
+            }
             // Alarm glow on top of everything, also the (often full-screen) keypad popup; it has no
             // pointer input, so the keypad underneath stays usable.
             val alarmState by runtime.alarm.state.collectAsState()

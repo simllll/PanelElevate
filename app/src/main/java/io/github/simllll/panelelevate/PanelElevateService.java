@@ -92,6 +92,13 @@ public class PanelElevateService extends Service {
     private volatile boolean deepDimmed = false;
     private final Runnable deepDimRunnable = this::enterDeepDim;
     private volatile boolean keepAliveFlag = false;
+    // The current standby level switches the display off (level 0): only then is a lit display
+    // while dimmed a sign of an external wake (at a low level it stays on on purpose)
+    private volatile boolean standbyScreenOff = false;
+    // While awake: restart Android's own screen-off timer regularly, otherwise Android dims and
+    // turns the display off after SCREEN_OFF_TIMEOUT although the service considers it awake
+    private static final long AWAKE_POKE_MS = 60_000;
+    private volatile long lastAwakePoke = 0;
 
     // Auto-brightness only rewrites the brightness when it moves at least this many steps
     // (or reaches the min/max end of the range); avoids a Settings + sysfs + MQTT write on
@@ -382,6 +389,11 @@ public class PanelElevateService extends Service {
 
     private void startIdleChecker() {
         scheduler.scheduleWithFixedDelay(guarded("Idle checker", () -> {
+            long now = System.currentTimeMillis();
+            if (!isDimmed && screenPower != null && now - lastAwakePoke > AWAKE_POKE_MS) {
+                lastAwakePoke = now;
+                turnScreenOnIfOff();
+            }
             if (keepAliveFlag) return;
 
             boolean dimEnabled = sharedPreferences.getBoolean(SP_SCREEN_SAVER_ENABLED, true);
@@ -648,7 +660,7 @@ public class PanelElevateService extends Service {
      * a second after dimming.
      */
     private boolean wokenExternally() {
-        return isDimmed && screenPower != null && isScreenInteractive()
+        return isDimmed && standbyScreenOff && screenPower != null && isScreenInteractive()
                 && SystemClock.elapsedRealtime() - dimmedAt > EXTERNAL_WAKE_GRACE_MS;
     }
 
@@ -687,7 +699,8 @@ public class PanelElevateService extends Service {
 
     /** Standby brightness; 0 switches the display off where the lowest brightness is still lit. */
     private void applyStandbyBrightness(int level) {
-        if (level <= 0 && screenPower != null && screenPower.isUsable()) {
+        standbyScreenOff = level <= 0 && screenPower != null && screenPower.isUsable();
+        if (standbyScreenOff) {
             Log.i(TAG, "Switching screen off via " + screenPower.name());
             mainHandler.post(() -> {
                 deviceHelper.markScreenOff();
